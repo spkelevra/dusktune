@@ -1,0 +1,74 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .pub directory will contain unpacked dependencies.
+.pub/
+
+# Coverity Scan
+coverity-results.zip
+
+# Symbols configuration
+# Change this file contains the symbol file that link to your application.
+# For more information: https://flutter.dev/docs/testing/symbolication
+# Flutter format format ignores this file includes the symbols info in debug and profile export *.symbols
+*.symbols
+
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Java compile
+build/
+
+# Android
+android/.idea
+android/.gradle
+android/captures/
+android/local.properties
+android/*.apk
+android/*.ap_
+android/*.dex
+android/.flutter-plugins-dependencies
+
+# Flutter/Dart
+**/generated/**
+!**/assets/generated/**
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Macos
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+ios/Flutter/app.flx
+ios/Flutter/Flutter.podspec
+ios/Flutter/GeneratedPluginRegistrant.swift
+ios/Flutter/GeneratedPluginRegistrant.h
+ios/Flutter/Flutter/
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+
+# Exceptions to the rules above
+#!.env.example
+!.gitignore
+!flutter/**
+
+# Gradle wrapper
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar
