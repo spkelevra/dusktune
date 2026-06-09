@@ -128,6 +128,15 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
   void initState() {
     super.initState();
     _listenToPlayback();
+    // Wire up auto-advance when a track finishes
+    AudioPlayerService.setOnTrackComplete(_skipToNext);
+  }
+
+  @override
+  void dispose() {
+    // Clear callback on dispose to avoid stale references
+    AudioPlayerService.setOnTrackComplete(null);
+    super.dispose();
   }
 
   void _listenToPlayback() {

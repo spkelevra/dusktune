@@ -16,6 +16,9 @@ class DuskAudioHandler extends BaseAudioHandler
   // ignore: unused_field
   Song? _currentSong;
 
+  /// Callback invoked when a track finishes playing — the UI uses this to decide what plays next.
+  void Function()? onTrackComplete;
+
   DuskAudioHandler() {
     // Wire up state broadcasting immediately on construction.
     _broadcastState();
@@ -23,6 +26,10 @@ class DuskAudioHandler extends BaseAudioHandler
     _player.processingStateStream.listen((state) {
       debugPrint('DuskAudioHandler processingState: $state');
       _broadcastState();
+      // Auto-advance when a track completes
+      if (state == ProcessingState.completed && onTrackComplete != null) {
+        onTrackComplete!();
+      }
     });
   }
 
@@ -142,6 +149,11 @@ class AudioPlayerService {
   }
 
   static DuskAudioHandler? get handler => _handler;
+
+  /// Set a callback for when the current track finishes playing.
+  static void setOnTrackComplete(void Function()? callback) {
+    _handler?.onTrackComplete = callback;
+  }
 
   /// Play a song.
   static Future<void> playSong(Song song) async {
