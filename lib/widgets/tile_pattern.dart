@@ -55,74 +55,151 @@ class TitlePatternPainter extends CustomPainter {
 
     canvas.drawRect(Rect.fromLTWH(0, 0, w, h), gradPaint);
 
-    // Pattern type (0-4) determines the geometric style
-    final patternType = (_hash % 5);
-    final lineAlpha = 0.08 + _rand(6) * 0.12;
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: lineAlpha)
-      ..strokeWidth = 0.8 + _rand(7) * 1.5
-      ..style = PaintingStyle.stroke;
+    // Concentric circles only — multiple randomized variations
+    final variation = _hash % 8;
+    final ringCount = 3 + (_hash % 12);   // 3-14 rings (sparse to dense)
+    final baseAlpha = 0.06 + _rand(6) * 0.12;
 
-    switch (patternType) {
-      case 0: // Concentric circles
-        for (int i = 0; i < 6; i++) {
-          final radius = (10 + i * (w / 14)) * (0.7 + _rand(10 + i) * 0.3);
-          canvas.drawCircle(center, radius, linePaint);
-        }
-        break;
-
-      case 1: // Diagonal lines
-        for (int i = -8; i < 8; i++) {
-          final offset = i * (w / 8) * (0.6 + _rand(20 + i.abs()) * 0.4);
-          canvas.drawLine(
-            Offset(offset, 0),
-            Offset(offset + w, h),
-            linePaint,
-          );
-        }
-        break;
-
-      case 2: // Horizontal bars (replaces dot grid)
-        final numBars = 5 + (_hash % 6);
-        for (int i = 0; i < numBars; i++) {
-          final barY = h * (i + 1) / (numBars + 1);
-          final barH = 2.0 + _rand(30 + i) * 4;
-          canvas.drawRect(
-            Rect.fromLTWH(0, barY - barH / 2, w, barH),
-            Paint()
-              ..color = Colors.white.withValues(alpha: lineAlpha * (0.5 + _rand(40 + i) * 0.5))
-              ..style = PaintingStyle.fill,
-          );
-        }
-        break;
-
-      case 3: // Horizontal waves
-        for (int i = 0; i < 8; i++) {
-          final baseY = h * (i + 1) / 9;
-          final path = Path();
-          path.moveTo(0, baseY);
-          for (double x = 0; x <= w; x += 5) {
-            final y = baseY + math.sin(x * 0.03 + _rand(40 + i) * 6) * (6 + _rand(50 + i) * 10);
-            path.lineTo(x, y);
-          }
-          canvas.drawPath(path, linePaint);
-        }
-        break;
-
-      case 4: // Radial lines from center
-        final numLines = 6 + (_hash % 8);
-        for (int i = 0; i < numLines; i++) {
-          final angle = (i / numLines) * math.pi * 2 + _rand(60 + i) * 0.3;
-          final len = w * 0.7 * (0.5 + _rand(70 + i) * 0.5);
-          canvas.drawLine(
+    switch (variation) {
+      case 0: // Sparse evenly spaced — sonar ping style (fewer rings, wide gaps)
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * (1 - t * 0.6);
+          canvas.drawCircle(
             center,
-            Offset(
-              center.dx + math.cos(angle) * len,
-              center.dy + math.sin(angle) * len,
-            ),
-            linePaint,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.8 + _rand(10 + i) * 0.5
+              ..style = PaintingStyle.stroke,
           );
         }
+        break;
+
+      case 1: // Dense evenly spaced with strong fade outward
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * math.pow(1 - t, 1.5);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.4 + _rand(20 + i) * 0.6
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 2: // Tight inner rings, wider outer spacing (ripple effect)
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * math.pow(t, 0.6);
+          final alpha = baseAlpha * (1 - t * 0.5);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.4 + _rand(30 + i) * 0.8
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 3: // Wide outer rings, sparse inner (reverse ripple)
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * math.pow(t, 1.4);
+          final alpha = baseAlpha * (0.3 + _rand(40 + i) * 0.7) * (1 - t * 0.4);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.5 + _rand(50 + i) * 1.5
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 4: // Variable ring thickness with organic feel
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * (0.4 + _rand(60 + i) * 0.6) * (1 - t * 0.5);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.3 + _rand(70 + i) * 2.8
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 5: // Offset center — organic ripple / water drop look
+        final offsetX = (_rand(80) - 0.5) * w * 0.1;
+        final offsetY = (_rand(81) - 0.5) * h * 0.1;
+        final offCenter = Offset(center.dx + offsetX, center.dy + offsetY);
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * (1 - t * 0.6);
+          canvas.drawCircle(
+            offCenter,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 0.4 + _rand(90 + i) * 1.0
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 6: // Alternating thin/thick rings (target reticle style)
+        for (int i = 0; i < ringCount; i++) {
+          final t = (i + 1) / (ringCount + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * (1 - t * 0.55);
+          final isThick = i % 2 == 0;
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = isThick ? (1.5 + _rand(100 + i) * 1.5) : (0.3 + _rand(110 + i) * 0.4)
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        break;
+
+      case 7: // Minimalist — very few rings with bold strokes and central dot
+        final minRings = math.max(3, ringCount ~/ 2);
+        for (int i = 0; i < minRings; i++) {
+          final t = (i + 1) / (minRings + 1);
+          final radius = w * 0.45 * t;
+          final alpha = baseAlpha * (1 - t * 0.5);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..color = Colors.white.withValues(alpha: alpha)
+              ..strokeWidth = 1.0 + _rand(120 + i) * 1.8
+              ..style = PaintingStyle.stroke,
+          );
+        }
+        // Central dot
+        canvas.drawCircle(
+          center,
+          w * 0.03,
+          Paint()
+            ..color = Colors.white.withValues(alpha: baseAlpha * 0.8)
+            ..style = PaintingStyle.fill,
+        );
         break;
     }
 
