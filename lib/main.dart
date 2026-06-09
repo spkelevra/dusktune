@@ -119,6 +119,10 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
   final List<Song> _recentlyPlayed = [];
   // Shuffle All mode — when enabled, next/prev picks random songs
   bool _shuffleAll = false;
+  // Play queue: the ordered list of songs for current playback session.
+  // Set whenever a song is tapped — grid order, alphabetical, or search results.
+  List<Song> _playQueue = [];
+  int _playQueueIndex = -1;
 
   @override
   void initState() {
@@ -138,7 +142,10 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
     });
   }
 
-  void playSong(Song song) async {
+  /// Play a song, optionally within a specific play queue.
+  /// If [queue] is provided, use it for next/previous navigation.
+  /// If omitted, default to alphabetical (allSongs).
+  void playSong(Song song, {List<Song>? queue}) async {
     // Track play count and recent order
     setState(() {
       _playCounts[song.id] = (_playCounts[song.id] ?? 0) + 1;
@@ -146,6 +153,11 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
       _recentlyPlayed.removeWhere((s) => s.id == song.id);
       _recentlyPlayed.insert(0, song);
       _currentSong = song;
+
+      // Set up the play queue for continuous playback
+      final effectiveQueue = queue ?? widget.allSongs;
+      _playQueue = effectiveQueue;
+      _playQueueIndex = _playQueue.indexWhere((s) => s.id == song.id);
     });
     await AudioPlayerService.playSong(song);
   }
@@ -209,28 +221,34 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
     }
   }
 
-  /// Override skipToNext to pick random song when shuffle is on, or next in recent list.
+  /// Override skipToNext to pick random song when shuffle is on, or next in play queue.
   void _skipToNext() {
     if (_shuffleAll) {
       final rng = math.Random();
       final randomSong = widget.allSongs[rng.nextInt(widget.allSongs.length)];
       playSong(randomSong);
+    } else if (_playQueue.isNotEmpty && _playQueueIndex >= 0) {
+      final nextIdx = (_playQueueIndex + 1) % _playQueue.length;
+      playSong(_playQueue[nextIdx]);
     } else if (_currentSong != null && widget.allSongs.isNotEmpty) {
-      // Find current song index in the library and skip to next
+      // Fallback: alphabetical from allSongs
       final idx = widget.allSongs.indexWhere((s) => s.id == _currentSong!.id);
       final nextIdx = (idx + 1) % widget.allSongs.length;
       playSong(widget.allSongs[nextIdx]);
     }
   }
 
-  /// Override skipToPrevious to pick random song when shuffle is on, or previous in recent list.
+  /// Override skipToPrevious to pick random song when shuffle is on, or previous in play queue.
   void _skipToPrevious() {
     if (_shuffleAll) {
       final rng = math.Random();
       final randomSong = widget.allSongs[rng.nextInt(widget.allSongs.length)];
       playSong(randomSong);
+    } else if (_playQueue.isNotEmpty && _playQueueIndex >= 0) {
+      final prevIdx = (_playQueueIndex - 1 + _playQueue.length) % _playQueue.length;
+      playSong(_playQueue[prevIdx]);
     } else if (_currentSong != null && widget.allSongs.isNotEmpty) {
-      // Find current song index in the library and skip to previous
+      // Fallback: alphabetical from allSongs
       final idx = widget.allSongs.indexWhere((s) => s.id == _currentSong!.id);
       final prevIdx = (idx - 1 + widget.allSongs.length) % widget.allSongs.length;
       playSong(widget.allSongs[prevIdx]);
@@ -407,7 +425,7 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
               itemCount: topSongs.length,
               itemBuilder: (context, index) {
                 final song = topSongs[index];
-                return _buildTopTile(song);
+                return _buildTopTile(song, queue: topSongs);
               },
             ),
           ),
@@ -466,9 +484,9 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
   }
 
   /// Top tile with generated pattern.
-  Widget _buildTopTile(Song song) {
+  Widget _buildTopTile(Song song, {List<Song>? queue}) {
     return GestureDetector(
-      onTap: () => playSong(song),
+      onTap: () => playSong(song, queue: queue),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -941,9 +959,9 @@ class _SearchContentState extends State<_SearchContent> {
                     style: const TextStyle(fontSize: 11, color: Colors.white38),
                   ),
                   onTap: () {
-                    // Access parent state to play the song
+                    // Access parent state to play the song within search results context
                     final shell = context.findAncestorStateOfType<_DuskTuneShellState>();
-                    shell?.playSong(song);
+                    shell?.playSong(song, queue: _results);
                   },
                 );
               },
