@@ -11,6 +11,10 @@ A minimalist, opinionated dark-mode music player for Android.
 Install the APK>Accept Permissions Prompt
 
 
+## Support
+
+If you dig it, support always rocks! [![Buy Me a Coffee](https://shields.io)](https://ko-fi.com/spkelevra)
+
 ## License
 
 MIT © 2026 spkelevra. See [LICENSE](LICENSE) and [NOTICES](NOTICES).
