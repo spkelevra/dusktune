@@ -1,11 +1,6 @@
 /// Song data model for dusktune.
 library;
 
-/// Maps to [SongModel] entries returned by [on_audio_query] v2.9.0
-/// with additional fields for playback state tracking.
-
-import 'dart:typed_data';
-import 'package:flutter/painting.dart';
 import 'package:on_audio_query/on_audio_query.dart';
 
 class Song {
@@ -15,7 +10,6 @@ class Song {
   final String? album;
   final int duration;       // Duration in milliseconds
   final String uri;         // Content URI or file path for playback
-  final Uint8List? artworkBytes;  // Album art as raw bytes (from queryArtwork)
 
   const Song({
     required this.id,
@@ -24,14 +18,7 @@ class Song {
     this.album,
     required this.duration,
     required this.uri,
-    this.artworkBytes,
   });
-
-  /// Returns a MemoryImage from cached artwork bytes, or null.
-  MemoryImage? get artImage => artworkBytes != null ? MemoryImage(artworkBytes!) : null;
-
-  /// Whether album art is available.
-  bool get hasArtwork => artworkBytes != null && artworkBytes!.isNotEmpty;
 
   /// Alias for [duration] in milliseconds — used by UI widgets.
   int get durationMs => duration;
@@ -58,19 +45,6 @@ class Song {
       album: songModel.album,
       duration: songModel.duration ?? 0,
       uri: songModel.data,
-    );
-  }
-
-  /// Copy this song with updated artwork bytes.
-  Song copyWith({Uint8List? artworkBytes}) {
-    return Song(
-      id: id,
-      title: title,
-      artist: artist,
-      album: album,
-      duration: duration,
-      uri: uri,
-      artworkBytes: artworkBytes ?? this.artworkBytes,
     );
   }
 

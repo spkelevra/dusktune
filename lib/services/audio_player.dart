@@ -181,18 +181,12 @@ class AudioPlayerService {
 
   /// Skip to next song in queue.
   static Future<void> skipToNext() async {
-    final len = (_handler?.queue.value.length ?? 0);
-    if (len > 1) {
-      await _handler?.skipToQueueItem(1); // simplified: play second item
-    }
+    await _handler?.skipToQueueItem(1);
   }
 
   /// Skip to previous song in queue.
   static Future<void> skipToPrevious() async {
-    final len = (_handler?.queue.value.length ?? 0);
-    if (len > 1) {
-      await _handler?.skipToQueueItem(0); // simplified: play first item
-    }
+    await _handler?.skipToQueueItem(0);
   }
 
   /// Current playback state stream.
