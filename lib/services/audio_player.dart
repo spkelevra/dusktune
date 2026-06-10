@@ -19,6 +19,10 @@ class DuskAudioHandler extends BaseAudioHandler
   /// Callback invoked when a track finishes playing — the UI uses this to decide what plays next.
   void Function()? onTrackComplete;
 
+  /// Callbacks for notification panel next/previous — delegated from UI state.
+  void Function()? onNextFromNotification;
+  void Function()? onPreviousFromNotification;
+
   DuskAudioHandler() {
     // Wire up state broadcasting immediately on construction.
     _broadcastState();
@@ -43,7 +47,7 @@ class DuskAudioHandler extends BaseAudioHandler
           MediaControl.stop,
           MediaControl.skipToNext,
         ],
-        systemActions: const {MediaAction.seek},
+        systemActions: const {},
         androidCompactActionIndices: const [0, 1, 3],
         processingState: const {
           ProcessingState.idle: AudioProcessingState.idle,
@@ -82,6 +86,30 @@ class DuskAudioHandler extends BaseAudioHandler
     if (queue.value.isEmpty) return;
     final mediaItem = queue.value[index];
     await _playMediaItem(mediaItem);
+  }
+
+  /// Override: delegate next to UI so it respects play queue + shuffle.
+  @override
+  Future<void> skipToNext() async {
+    if (onNextFromNotification != null) {
+      onNextFromNotification!();
+    } else {
+      // Fallback: replay current track from start
+      await _player.seek(Duration.zero);
+      await _player.play();
+    }
+  }
+
+  /// Override: delegate previous to UI so it respects play queue + shuffle.
+  @override
+  Future<void> skipToPrevious() async {
+    if (onPreviousFromNotification != null) {
+      onPreviousFromNotification!();
+    } else {
+      // Fallback: replay current track from start
+      await _player.seek(Duration.zero);
+      await _player.play();
+    }
   }
 
   /// Load and play a [Song] using its file path.
@@ -153,6 +181,15 @@ class AudioPlayerService {
   /// Set a callback for when the current track finishes playing.
   static void setOnTrackComplete(void Function()? callback) {
     _handler?.onTrackComplete = callback;
+  }
+
+  /// Set callbacks for notification panel next/previous buttons.
+  static void setNotificationCallbacks({
+    void Function()? onNext,
+    void Function()? onPrevious,
+  }) {
+    _handler?.onNextFromNotification = onNext;
+    _handler?.onPreviousFromNotification = onPrevious;
   }
 
   /// Play a song.

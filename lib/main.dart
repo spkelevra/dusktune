@@ -7,6 +7,7 @@ import 'app_theme.dart';
 import 'models/song.dart';
 import 'services/audio_player.dart';
 import 'services/music_library.dart';
+import 'services/app_settings.dart';
 import 'widgets/tile_pattern.dart';
 
 void main() async {
@@ -130,12 +131,40 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
     _listenToPlayback();
     // Wire up auto-advance when a track finishes
     AudioPlayerService.setOnTrackComplete(_skipToNext);
+    // Wire up notification panel next/previous controls
+    AudioPlayerService.setNotificationCallbacks(
+      onNext: _skipToNext,
+      onPrevious: _skipToPrevious,
+    );
+    // Load persisted settings
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final appName = await AppSettings.loadAppName();
+    final playCounts = await AppSettings.loadPlayCounts();
+    if (mounted) {
+      setState(() {
+        _appName = appName;
+        _playCounts.clear();
+        _playCounts.addAll(playCounts);
+      });
+    }
+  }
+
+  Future<void> _savePlayCounts() async {
+    await AppSettings.savePlayCounts(_playCounts);
+  }
+
+  Future<void> _saveAppName(String name) async {
+    await AppSettings.saveAppName(name);
   }
 
   @override
   void dispose() {
-    // Clear callback on dispose to avoid stale references
+    // Clear callbacks on dispose to avoid stale references
     AudioPlayerService.setOnTrackComplete(null);
+    AudioPlayerService.setNotificationCallbacks(onNext: null, onPrevious: null);
     super.dispose();
   }
 
@@ -168,6 +197,8 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
       _playQueue = effectiveQueue;
       _playQueueIndex = _playQueue.indexWhere((s) => s.id == song.id);
     });
+    // Persist play counts to disk
+    _savePlayCounts();
     await AudioPlayerService.playSong(song);
   }
 
@@ -329,7 +360,10 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
                       TextButton(
                         onPressed: () {
                           final name = ctrl.text.trim();
-                          if (name.isNotEmpty) setState(() => _appName = name);
+                          if (name.isNotEmpty) {
+                            setState(() => _appName = name);
+                            _saveAppName(name);
+                          }
                           Navigator.pop(ctx);
                         },
                         child: const Text('Save'),
@@ -721,7 +755,7 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Progress bar (thin)
+          // Progress bar (thin) — minHeight increased slightly for easier touch detection
           GestureDetector(
             onHorizontalDragUpdate: (details) {
               final box = context.findRenderObject() as RenderBox?;
@@ -737,7 +771,7 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
               value: progress.clamp(0.0, 1.0),
               backgroundColor: Colors.transparent,
               valueColor: const AlwaysStoppedAnimation<Color>(Colors.white70),
-              minHeight: 3,
+              minHeight: 5,
             ),
           ),
 
