@@ -1,10 +1,14 @@
 /// Desktop music scanner — recursively scans folders for audio files
 /// and parses metadata using ID3 tags (MP3) or filename fallback.
+///
+/// All file-system I/O that touches network paths runs in a background isolate
+/// with hard timeouts so the UI never freezes on unmounted SMB shares.
 library;
 
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
-import 'package:id3/id3.dart';
 import 'package:path/path.dart' as path_package;
 import '../models/song.dart';
 
@@ -13,100 +17,178 @@ const Set<String> supportedExtensions = {
   '.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac', '.wma', '.opus',
 };
 
+/// How long to wait for a single folder accessibility check via `stat`.
+const Duration _accessTimeout = Duration(seconds: 3);
+
+/// Hard timeout per-folder during recursive scan (runs in isolate).
+const Duration _scanIsolateTimeout = Duration(seconds: 60);
+
+// ---------------------------------------------------------------------------
+// Path normalization
+// ---------------------------------------------------------------------------
+
+/// Normalize a user-provided path for macOS/Windows compatibility.
+String normalizePath(String raw) {
+  var path = raw.trim();
+
+  if (path.startsWith('smb://')) {
+    final withoutScheme = path.substring(6); // strip 'smb://'
+    final slashIdx = withoutScheme.indexOf('/');
+    if (slashIdx > 0) {
+      final shareName = withoutScheme.substring(0, slashIdx);
+      final subPath = withoutScheme.substring(slashIdx + 1);
+      path = '/Volumes/$shareName/${subPath.isEmpty ? '' : subPath}';
+    } else {
+      path = '/Volumes/$withoutScheme';
+    }
+    debugPrint('DesktopMusicScanner: normalized SMB URL "$raw" → "$path"');
+  }
+
+  return path;
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility check — uses `stat` via shell so it can be killed on timeout
+// ---------------------------------------------------------------------------
+
+/// Check if a folder exists and is accessible using a native `stat` call.
+Future<bool> isFolderAccessible(String folderPath) async {
+  try {
+    final result = await Process.run('stat', ['-f', '%z', folderPath])
+        .timeout(_accessTimeout);
+    if (result.exitCode != 0) {
+      debugPrint('DesktopMusicScanner: stat failed for $folderPath');
+      return false;
+    }
+    final typeResult = await Process.run('test', ['-d', folderPath])
+        .timeout(_accessTimeout);
+    if (typeResult.exitCode != 0) {
+      debugPrint('DesktopMusicScanner: $folderPath is not a directory');
+      return false;
+    }
+    return true;
+  } on TimeoutException {
+    debugPrint('DesktopMusicScanner: folder timed out (unreachable): $folderPath');
+    return false;
+  } catch (e) {
+    debugPrint('DesktopMusicScanner: folder inaccessible ($e): $folderPath');
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Isolate-based recursive scan — pure dart:io, no Flutter calls inside
+// ---------------------------------------------------------------------------
+
+/// Pure-dart entry point for the scanning isolate.
+/// Returns a list of [title, artist, album, uri] entries. No Flutter APIs called.
+List<List<dynamic>> _scanIsolatePure(String folderPath) {
+  final results = <List<dynamic>>[];
+  final dirsToScan = [folderPath];
+
+  while (dirsToScan.isNotEmpty) {
+    final currentPath = dirsToScan.removeLast();
+    final currentDir = Directory(currentPath);
+
+    try {
+      final entities = currentDir.listSync();
+      for (final entity in entities) {
+        if (entity is File) {
+          final ext = path_package.extension(entity.path).toLowerCase();
+          if (!supportedExtensions.contains(ext)) continue;
+
+          final title = _parseTitleFromFilenamePure(entity.path);
+          final artist = _parseArtistFromFilenamePure(entity.path);
+          results.add([title, artist, null, entity.path]);
+        } else if (entity is Directory) {
+          dirsToScan.add(entity.path);
+        }
+      }
+    } catch (e) {
+      // Silently skip unreadable directories in the isolate
+    }
+  }
+
+  return results;
+}
+
+/// Extract title from file path — pure dart:io, no Flutter.
+String _parseTitleFromFilenamePure(String filePath) {
+  var title = path_package.basenameWithoutExtension(filePath);
+  title = title.replaceFirst(RegExp(r'^\d+\s*[-\.]\s*'), '');
+  title = title.replaceFirst(RegExp(r'^\[\d+\]\s*'), '');
+  return title.trim().isEmpty ? path_package.basenameWithoutExtension(filePath) : title;
+}
+
+/// Extract artist from "Artist - Title" pattern — pure dart:io.
+String? _parseArtistFromFilenamePure(String filePath) {
+  final basename = path_package.basenameWithoutExtension(filePath);
+  if (basename.contains(' - ')) {
+    return basename.split(' - ')[0].trim();
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /// Scan a list of directories recursively and return all discovered songs.
 Future<List<Song>> scanMusicFolders(List<String> folders) async {
-  final songs = <Song>[];
-  int idCounter = 0;
+  final allSongs = <Song>[];
 
-  for (final folder in folders) {
-    final dir = Directory(folder);
-    if (!await dir.exists()) {
-      debugPrint('DesktopMusicScanner: folder does not exist: $folder');
+  for (final rawFolder in folders) {
+    final folder = normalizePath(rawFolder);
+
+    // Quick accessibility check via subprocess (won't block Dart event loop)
+    if (!await isFolderAccessible(folder)) {
+      debugPrint('DesktopMusicScanner: SKIPPING inaccessible folder: $folder');
       continue;
     }
 
-    await for (final entity in dir.list(recursive: true, followLinks: false)) {
-      if (entity is File) {
-        final ext = path_package.extension(entity.path).toLowerCase();
-        if (!supportedExtensions.contains(ext)) continue;
+    debugPrint('DesktopMusicScanner: scanning $folder in isolate...');
 
-        try {
-          idCounter++;
-          final song = _parseFile(entity, idCounter);
-          songs.add(song);
-        } catch (e) {
-          debugPrint('DesktopMusicScanner: failed to parse ${entity.path}: $e');
-        }
-      }
-    }
+    // Run the recursive scan in a background isolate with a hard timeout.
+    final songs = await _scanInIsolate(folder);
+    allSongs.addAll(songs);
   }
 
   // Sort alphabetically by title
-  songs.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+  allSongs.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  debugPrint('DesktopMusicScanner: found ${songs.length} songs from ${folders.length} folder(s)');
-  return songs;
+  debugPrint('DesktopMusicScanner: found ${allSongs.length} songs from ${folders.length} folder(s)');
+  return allSongs;
 }
 
-/// Parse a single audio file and extract metadata.
-Song _parseFile(File file, int id) {
-  final basename = path_package.basenameWithoutExtension(file.path);
-  String? title;
-  String? artist;
-  String? album;
-  int duration = 0;
+/// Run the pure-dart scan in an isolate with a hard timeout.
+Future<List<Song>> _scanInIsolate(String folderPath) async {
+  try {
+    // Isolate.run with the pure function — no Flutter APIs inside.
+    final rawResults = await Isolate.run<List<List<dynamic>>>(() {
+      return _scanIsolatePure(folderPath);
+    }).timeout(_scanIsolateTimeout);
 
-  // Try ID3 parsing for MP3 files
-  final ext = path_package.extension(file.path).toLowerCase();
-  if (ext == '.mp3') {
-    try {
-      final bytes = file.readAsBytesSync();
-      final mp3 = MP3Instance(bytes);
-      if (mp3.parseTagsSync()) {
-        final tags = mp3.getMetaTags() ?? {};
-        title = _cleanTag(tags['Title']?.toString());
-        artist = _cleanTag(tags['Artist']?.toString());
-        album = _cleanTag(tags['Album']?.toString());
-      }
-    } catch (e) {
-      debugPrint('DesktopMusicScanner: ID3 parse failed for ${file.path}: $e');
+    // Convert raw results to Song objects (back in main isolate).
+    int idCounter = 0;
+    final songs = <Song>[];
+    for (final entry in rawResults) {
+      idCounter++;
+      songs.add(Song.fromMap(
+        id: idCounter,
+        title: entry[0] as String,
+        artist: entry[1] as String?,
+        album: entry[2] as String?,
+        uri: entry[3] as String,
+      ));
     }
+
+    debugPrint('DesktopMusicScanner: isolate returned ${songs.length} songs from $folderPath');
+    return songs;
+  } on TimeoutException {
+    debugPrint('DesktopMusicScanner: isolate scan timed out for $folderPath');
+    return [];
+  } catch (e, st) {
+    debugPrint('DesktopMusicScanner: isolate error scanning $folderPath: $e\n$st');
+    return [];
   }
-
-  // Fallback to filename if no metadata found
-  title ??= _parseTitleFromFilename(basename);
-  
-  // Try to parse "Artist - Title" pattern from filename
-  if (basename.contains(' - ')) {
-    final parts = basename.split(' - ');
-    if (artist == null && parts.isNotEmpty) {
-      artist = parts[0].trim();
-    }
-  }
-
-  return Song.fromMap(
-    id: id,
-    title: title,
-    artist: artist,
-    album: album,
-    duration: duration,
-    uri: file.path,
-  );
-}
-
-/// Clean up a tag value — trim whitespace and null strings.
-String? _cleanTag(String? value) {
-  if (value == null || value.trim().isEmpty) return null;
-  return value.trim();
-}
-
-/// Parse title from filename, removing common patterns like track numbers.
-String _parseTitleFromFilename(String basename) {
-  var title = basename;
-  
-  // Remove leading track number patterns: "01 - ", "01.", "[01] ", etc.
-  title = title.replaceFirst(RegExp(r'^\d+\s*[-\.]\s*'), '');
-  title = title.replaceFirst(RegExp(r'^\[\d+\]\s*'), '');
-  
-  return title.trim().isEmpty ? basename : title;
 }

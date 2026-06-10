@@ -1,6 +1,7 @@
 /// Music library service — queries device music (Android) or scans folders (desktop).
 library;
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:on_audio_query/on_audio_query.dart';
@@ -67,9 +68,17 @@ class MusicLibrary {
       return [];
     }
 
-    final songs = await desktop_scanner.scanMusicFolders(folders);
-    debugPrint('MusicLibrary (Desktop): loaded ${songs.length} songs');
-    return songs;
+    // Wrap the entire scan in a timeout so even if something goes wrong,
+    // the app doesn't hang at startup. Total budget: 60s + 5s per folder.
+    final totalTimeout = Duration(seconds: 30 + (folders.length * 45));
+    try {
+      final songs = await desktop_scanner.scanMusicFolders(folders).timeout(totalTimeout);
+      debugPrint('MusicLibrary (Desktop): loaded ${songs.length} songs');
+      return songs;
+    } on TimeoutException {
+      debugPrint('MusicLibrary (Desktop): scan exceeded total timeout (${totalTimeout.inSeconds}s) for ${folders.length} folder(s)');
+      return [];
+    }
   }
 
   // ---- Search ----

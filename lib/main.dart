@@ -9,6 +9,7 @@ import 'app_theme.dart';
 import 'models/song.dart';
 import 'services/audio_player.dart';
 import 'services/music_library.dart';
+import 'services/music_scanner.dart' as desktop_scanner;
 import 'services/app_settings.dart';
 import 'widgets/tile_pattern.dart';
 
@@ -89,7 +90,7 @@ class _AppRootState extends State<AppRoot> {
   }
 
   /// Re-scan music folders after settings change.
-  Future<void> rescanLibrary() async {
+  Future<int> rescanLibrary() async {
     final library = MusicLibrary();
     try {
       final songs = await library.rescan();
@@ -99,8 +100,10 @@ class _AppRootState extends State<AppRoot> {
           _needsFolderSetup = false;
         });
       }
-    } catch (e) {
-      debugPrint('AppRoot rescanLibrary error: $e');
+      return songs.length;
+    } catch (e, st) {
+      debugPrint('AppRoot rescanLibrary error: $e\n$st');
+      return 0;
     }
   }
 
@@ -1315,6 +1318,7 @@ class _SettingsContent extends StatefulWidget {
 class _SettingsContentState extends State<_SettingsContent> {
   List<String> _folders = [];
   bool _loading = true;
+  bool _scanning = false; // true while rescanning after add/remove
   final TextEditingController _addPathController = TextEditingController();
 
   @override
@@ -1343,31 +1347,39 @@ class _SettingsContentState extends State<_SettingsContent> {
     final trimmed = (path ?? _addPathController.text).trim();
     if (trimmed.isEmpty) return;
 
-    final dir = Directory(trimmed);
-    if (!await dir.exists()) {
+    // Normalize SMB URLs to local mount paths
+    final normalized = desktop_scanner.normalizePath(trimmed);
+
+    // Check accessibility with timeout before adding
+    if (!await desktop_scanner.isFolderAccessible(normalized)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Folder does not exist: $trimmed')),
+          SnackBar(
+            content: Text('Cannot access folder: $normalized'),
+            backgroundColor: Colors.orange[900],
+          ),
         );
       }
       return;
     }
 
-    final updated = List<String>.from(_folders)..add(trimmed);
+    final updated = List<String>.from(_folders)..add(normalized);
     await AppSettings.saveMusicFolders(updated);
     setState(() {
       _folders = updated;
       _addPathController.clear();
+      _scanning = true;
     });
 
     // Re-scan library
     if (!mounted) return;
     final shell = context.findAncestorStateOfType<_AppRootState>();
-    await shell?.rescanLibrary();
+    final songCount = await shell?.rescanLibrary() ?? 0;
 
     if (mounted) {
+      setState(() => _scanning = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added folder')),
+        SnackBar(content: Text('Added folder — found $songCount songs')),
       );
     }
   }
@@ -1380,11 +1392,11 @@ class _SettingsContentState extends State<_SettingsContent> {
     // Re-scan library
     if (!mounted) return;
     final shell = context.findAncestorStateOfType<_AppRootState>();
-    await shell?.rescanLibrary();
+    final songCount = await shell?.rescanLibrary() ?? 0;
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Removed: $removed')),
+        SnackBar(content: Text('Removed: $removed — $songCount songs remaining')),
       );
     }
   }
@@ -1395,127 +1407,230 @@ class _SettingsContentState extends State<_SettingsContent> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Music Folders',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[200],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'dusktune will scan these folders for audio files.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 16),
-
-                // Add folder row
-                Row(
+    return Stack(
+      children: [
+        CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _addPathController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: 'Enter folder path',
-                          hintStyle: const TextStyle(color: Colors.white38),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey[800]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey[800]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.white38),
-                          ),
-                        ),
-                        onSubmitted: (_) => _addFolder(null),
+                    Text(
+                      'Music Folders',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[200],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () => _addFolder(null),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'dusktune will scan these folders for audio files.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Add folder row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _addPathController,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Enter folder path or smb:// URL',
+                              hintStyle: const TextStyle(color: Colors.white38),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.grey[800]!),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.grey[800]!),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Colors.white38),
+                              ),
+                            ),
+                            onSubmitted: (_) => _addFolder(null),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: () => _addFolder(null),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Folder list with accessibility check on load
+                    if (_folders.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Center(
+                          child: Text(
+                            'No music folders configured.',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ),
+                      )
+                    else
+                      ..._folders.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final folder = entry.value;
+                        return _MusicFolderTile(
+                          index: idx,
+                          folder: folder,
+                          onRemove: () => _removeFolder(idx),
+                        );
+                      }),
+
+                    const SizedBox(height: 32),
+
+                    // Info
+                    Text(
+                      'Supported formats: MP3, FLAC, WAV, M4A, OGG, AAC, WMA, Opus\n\n'
+                      'Network/SMB folders are supported — enter the mount path (e.g. /Volumes/Share/Music)\n'
+                      'or SMB URL (smb://host/share/path). Folders must be mounted and accessible.\n\n'
+                      'Changes take effect immediately — your library is re-scanned when you add or remove a folder.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600], height: 1.6),
                     ),
                   ],
                 ),
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
+          ],
+        ),
 
-                const SizedBox(height: 24),
-
-                // Folder list
-                if (_folders.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Center(
-                      child: Text(
-                        'No music folders configured.',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
+        // Scanning overlay
+        if (_scanning)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black54,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      'Scanning music files...',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
-                  )
-                else
-                  ..._folders.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final folder = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[900],
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.folder, size: 20, color: Colors.white54),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                folder,
-                                style: const TextStyle(color: Colors.white70, fontSize: 13),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.white54),
-                              onPressed: () => _removeFolder(idx),
-                              tooltip: 'Remove',
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-
-                const SizedBox(height: 32),
-
-                // Info
-                Text(
-                  'Supported formats: MP3, FLAC, WAV, M4A, OGG, AAC, WMA, Opus\n\n'
-                  'Changes take effect immediately — your library is re-scanned when you add or remove a folder.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600], height: 1.6),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 80)),
       ],
+    );
+  }
+}
+
+/// A single music folder tile with live accessibility status.
+class _MusicFolderTile extends StatefulWidget {
+  final int index;
+  final String folder;
+  final VoidCallback onRemove;
+
+  const _MusicFolderTile({
+    required this.index,
+    required this.folder,
+    required this.onRemove,
+  });
+
+  @override
+  State<_MusicFolderTile> createState() => _MusicFolderTileState();
+}
+
+class _MusicFolderTileState extends State<_MusicFolderTile> {
+  bool? _accessible; // null = checking, true/false = result
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAccess();
+  }
+
+  Future<void> _checkAccess() async {
+    setState(() => _accessible = null);
+    final accessible = await desktop_scanner.isFolderAccessible(widget.folder);
+    if (mounted) {
+      setState(() => _accessible = accessible);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _accessible == false ? Colors.red[900]?.withValues(alpha: 0.3) : Colors.grey[900],
+          borderRadius: BorderRadius.circular(6),
+          border: _accessible == false
+              ? Border.all(color: Colors.orange[800]!)
+              : null,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.folder,
+              size: 20,
+              color: _accessible == false ? Colors.orange : Colors.white54,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.folder,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (_accessible == null)
+                    const Text(
+                      'Checking...',
+                      style: TextStyle(fontSize: 10, color: Colors.white38),
+                    )
+                  else if (!_accessible!)
+                    Text(
+                      '⚠ Not accessible — make sure the volume is mounted',
+                      style: const TextStyle(fontSize: 10, color: Colors.orange),
+                    ),
+                ],
+              ),
+            ),
+            // Re-check button
+            IconButton(
+              icon: Icon(
+                Icons.refresh,
+                size: 18,
+                color: _accessible == null ? Colors.white38 : Colors.white54,
+              ),
+              onPressed: _checkAccess,
+              tooltip: 'Re-check',
+            ),
+            // Remove button
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.white54),
+              onPressed: widget.onRemove,
+              tooltip: 'Remove',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
