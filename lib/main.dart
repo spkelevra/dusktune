@@ -408,6 +408,12 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
 
     final key = event.logicalKey;
 
+    // Disable navigation hotkeys on Search tab so typing in the search field works normally.
+    // Space (play/pause) remains active on all tabs — it is a global media control.
+    if (widget.tabIndex == 1) {
+      if (key != LogicalKeyboardKey.space) return;
+    }
+
     // Backtick (`) → shuffle grid
     if (key == LogicalKeyboardKey.backquote) {
       shuffleTopNine(context);
@@ -421,6 +427,18 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
       return;
     }
 
+
+    // Left Arrow → previous song
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _skipToPrevious();
+      return;
+    }
+
+    // Right Arrow → next song
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _skipToNext();
+      return;
+    }
     // 1-9 → play tile by position
     int? tileIndex;
     if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) tileIndex = 0;
