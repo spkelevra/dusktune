@@ -454,6 +454,7 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
     if (tileIndex != null) {
       final topSongs = getTopSongs(9);
       if (tileIndex < topSongs.length) {
+        setState(() => _selectedGridTile = tileIndex);
         playSong(topSongs[tileIndex], queue: topSongs);
       }
     }
