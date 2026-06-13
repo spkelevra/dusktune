@@ -690,6 +690,8 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
     bool isSelected = false,
     required VoidCallback onTap,
   }) {
+    final context = _tileContext(song);
+
     return GestureDetector(
       onTap: onTap,
       child: Column(
@@ -716,22 +718,68 @@ class _DuskTuneShellState extends State<DuskTuneShell> {
           ),
           const SizedBox(height: 4),
           Expanded(
-            flex: 1,
-            child: Text(
-              song.title,
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.white70,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
+            flex: context.isNotEmpty ? 2 : 1,
+            child: context.isNotEmpty
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        song.title,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        context,
+                        style: const TextStyle(
+                          fontSize: 8,
+                          color: Colors.white54,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  )
+                : Text(
+                    song.title,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
           ),
         ],
       ),
     );
+  }
+
+  /// Returns a context string for the tile label — artist first, then folder.
+  String _tileContext(Song song) {
+    // Treat "Unknown Artist" as blank — fall through to folder
+    final artist = song.artist;
+    if (artist != null && artist.isNotEmpty && artist.toLowerCase() != 'unknown artist') {
+      return artist;
+    }
+    // Fallback: extract parent folder name from URI/path
+    final uri = song.uri;
+    final separator = uri.contains(r'\') ? r'\' : '/';
+    final parts = uri.split(separator);
+    if (parts.length >= 2) {
+      return parts[parts.length - 2];
+    }
+    return '';
   }
 
   /// Song list item (grey square + info).
